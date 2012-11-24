@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<title>Is today's weather the same as yesterday's?</title>
+	<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+	<script src="{{ url_for('static', filename='itwtsay.js') }}" type="text/javascript"></script>
+</head>
+
+<body>
+	<h1>Is today's weather the same as yesterday's?</h1>
+	<h2>...at {{ zipcode }}</h2>
+	<p>{{ weather }}</p>
+
+	<form action="" method="get">
+		<input type="text" name="zipcode" placeholder="zipcode" id="zipcode">
+	</form>
+
+	<div class="weather">
+		<p><strong>Today's Weather</strong></p>
+		<ul>
+			<li><strong>High: </strong> <span class="temp fahrenheit">{{ today.high }}</span>
+			<li><strong>Low: </strong> <span class="temp fahrenheit">{{ today.low }}</span>
+			<li><strong>Weather: </strong> <span>{{ today.conditions }}</span>
+		</ul>
+	</div>
+
+	<div class="weather">
+		<p><strong>Yesterday's Weather</strong></p>
+		<ul>
+			<li><strong>High: </strong> <span class="temp fahrenheit">{{ yesterday.high }}</span>
+			<li><strong>Low: </strong> <span class="temp fahrenheit">{{ yesterday.low }}</span>
+			<li><strong>Weather: </strong> <span>{{ yesterday.conditions }}</span>
+		</ul>
+	</div>
+</body>
