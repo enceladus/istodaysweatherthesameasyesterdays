@@ -1,6 +1,7 @@
 *.py[cod]
 venv
 *.un~
+keys.py
 
 # C extensions
 *.so

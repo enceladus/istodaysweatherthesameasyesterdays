@@ -1,17 +1,120 @@
+from __future__ import with_statement
 from flask import Flask, render_template, request, make_response
-import urllib2, simplejson
+import urllib2, simplejson, sqlite3, keys, sys
 from urllib import urlencode
+from contextlib import closing
+from datetime import date, timedelta
+from flask.ext.sqlalchemy import SQLAlchemy
+from app_utils import *
 
 DEBUG = True
 app = Flask(__name__)
 app.config.from_object(__name__)
 
-class Weather:
-	def __init__(self, high, low, conditions):
-		self.high = high
-		self.low = low
-		self.avg = (high + low) / 2
-		self.conditions = conditions
+# database config
+app.config['SQLALCHEMY_DATABASE_URI'] = keys.DATABASE_URI
+db = SQLAlchemy(app)
+
+
+# The flow of the app:
+#	1. Zipcode request resolves to city name - get_city_name(zipcode)
+#		a. If that fails, break w/ error message, show sample (Austin, TX)
+#	2. Get yesterday's weather - yesterdays_weather(city)
+#		a. First from db
+#		b. If that fails, fetch from wunderground api - get_json(url)
+#		c. If that fails, break w/ error message
+#	3. Get today's weather - todays_weather(city)
+#		a. First from db
+#		b. If that fails, fetch from worldweatheronline api - get_json(url)
+#		c. If that fails, break w/ error message
+#	4. Compare two Weather objects - compare(today, yesterday)
+#		a. standardize_description()
+#	5. All of this wrapped in get_relative_weather(zipcode)
+
+#	get_weather_from_database and get_weather_from_api should BOTH
+#	return Weather objects, with high, low, avg, and condition attributes
+
+def get_relative_weather(zipcode):
+	try:
+		city = get_city_name(zipcode)
+	except:
+		print 'Error!'
+		return False
+
+	yesterday = yesterdays_weather(city)
+	today = todays_weather(city)
+	return compare(today, yesterday)
+
+def get_city_name(zipcode):
+	""" Gets city name from a zipcode using Google Maps API
+		Returns in format City, ST, Country """
+	try:
+		city = geocode(zipcode)
+		city = find_between(city, '"', '"') 	# remove json formatting
+		city = city.split(', ')					# separate into parts
+		city[1] = remove_numbers(city[1])
+		return ', '.join(city).strip()			# return final value
+	except:
+		print 'Your city was not found, resorting to default.'
+		return 'Austin, TX, USA'				# show sample on break
+
+def get_todays_weather(city):
+	""" Fetches today's weather either from DB cache or API """
+	city = get_city_name(city)
+	day = date.today() 					# returns (YYYY, MM, DD)
+	return get_weather_from_database(city, day) or get_weather_from_api(city, 'today')
+
+def get_yesterdays_weather(city):
+	""" Fetches yesterday's weather either from DB cache or API """
+	city = get_city_name(city)
+	day = date.today() - timedelta(1) 		# returns (YYYY, MM, DD-1)
+	return get_weather_from_database(city, day) or get_weather_from_api(city, 'yesterday')
+
+def get_weather_from_database(city, day):
+	""" Gets weather object from DB for specified city and date """
+	try:
+		weather = Weather.query.filter_by(city=city, day=day).first()
+	except:
+		weather = None
+	if weather == None: print 'Record could not be found.'
+	return weather
+
+def get_weather_from_api(city, day):
+	""" fetches weather from either WWO or WU """
+
+	if day == 'today':
+		data = {'q': city, 'format': 'json', 'key': keys.WWO_API_KEY}
+		weather_json = get_json(WWO_BASE_URL + urllib.urlencode(data))
+		high = int(weather_json['data']['weather'][0]['tempMaxF'])
+		low = int(weather_json['data']['weather'][0]['tempMinF'])
+		conditions = weather_json['data']['weather'][0]['weatherDesc'][0]['value']
+		weather = Weather(city, high, low, conditions, date.today())
+	elif date == 'yesterday':
+		weather = False
+	print 'Weather fetched from API.'
+	return weather
+
+class Weather(db.Model):
+	""" Stores weather information from the API,
+		also serves as a model for the database. """
+
+	id = db.Column(db.Integer, primary_key=True)
+	city = db.Column(db.String(150))
+	high = db.Column(db.Integer)
+	low = db.Column(db.Integer)
+	conditions = db.Column(db.String(80))
+	day = db.Column(db.Date)
+	
+	def __init__(self, city, high, low, conditions, day):
+		self.city 		= city
+		self.high 		= high
+		self.low  		= low
+		self.conditions = standardize_description(conditions)
+		self.day		= day
+		self.avg 		= (high + low) / 2
+
+	def __repr__(self):
+		return "<Weather {0}>".format(self.city)
 
 	def hotter_than(self, other):
 		return (self.avg > other.avg + 4)
@@ -19,41 +122,53 @@ class Weather:
 	def colder_than(self, other):
 		return (self.avg < other.avg - 4)
 
+	def save(self):
+		try:
+			if get_weather_from_database(self.city, self.day):
+				print 'Already in database. No need to save again.'
+				return True
+			else:
+				db.session.add(self)
+				db.session.commit()
+		except:
+			print 'Could not be saved to database.'
+			return False
+
 def standardize_description(description):
+	""" Standardizes description to one of the following: clear, clouds, storm, freezing, snow, wet """
 	# based on codes from 
 	# http://www.worldweatheronline.com/feed/wwoConditionCodes.txt
 
-	# compare description
-		# if contains 'clear' or 'sunny', return 'clear'
-		# if contains 'cloudy', 'overcast', 'fog', return 'clouds'
-		# if contains 'thunder', return 'storm'
-		# if contains 'ice', 'sleet', 'freezing rain', 'freezing drizzle'
-		# if contains 'snow', 'blizzard', 
-		# if contains 'rain', 'drizzle', 'mist', return 'wet'
-	return 0
+	d = description.lower()
+	conditions = {
+		'clear': 	['clear', 'sunny'],
+		'clouds': 	['cloudy', 'overcast', 'fog'],
+		'storm': 	['thunder'],
+		'freezing': ['ice', 'sleet', 'freezing rain', 'freezing drizzle'],
+		'snow': 	['snow', 'blizzard'],
+		'wet': 		['rain', 'drizzle', 'mist']
+	}
 
-def get_json(url):
-	req = urllib2.Request(url)
-	opener = urllib2.build_opener()
-	f = opener.open(req)
-	return simplejson.load(f)
+	for key in conditions.keys():
+		if any_in_string(d, conditions[key]):
+			return key
+	return 'other'
 
-def yesterdays_weather(location):
-	weather_json = get_json('http://autocomplete.wunderground.com/aq?query=' + location)
-
-	high = 55
-	low = 44
-	conditions = 'clear'
-	return Weather(high, low, conditions)
-
-def todays_weather(location):
-	weather_json = get_json("http://free.worldweatheronline.com/feed/weather.ashx?q=" + location + "&format=json&key=6f0b244099202239122511")
-
-	high = int(weather_json['data']['weather'][0]['tempMaxF'])
-	low = int(weather_json['data']['weather'][0]['tempMinF'])
-	# conditions = get_conditions_from_code(weather_json['data']['weather'][0]['weatherCode'])
-	conditions = weather_json['data']['weather'][0]['weatherDesc'][0]['value']
-	return Weather(high, low, conditions)
+	"""if any_in_string(s, clear_chars):
+		conditions = 'clear'
+	elif any_in_string(s, clouds_chars):
+		conditions = 'clouds'
+	elif any_in_string(s, storm_chars):
+		conditions = 'storm'
+	elif any_in_string(s, freezing_chars):
+		conditions = 'freezing'
+	elif any_in_string(s, snow_chars):
+		conditions = 'snow'
+	elif any_in_string(s, wet_chars):
+		conditions = 'wet'
+	else:
+		conditions = 'other'
+	return conditions"""
 
 def compare(location):
 	yesterday = yesterdays_weather(location)
@@ -93,6 +208,8 @@ def default_zipcode():
 
 @app.route('/')
 def index(zipcode=None):
+	""" The only page there is """
+
 	zipcode = request.args.get('zipcode') or default_zipcode()
 
 	if (zipcode != default_zipcode()):
