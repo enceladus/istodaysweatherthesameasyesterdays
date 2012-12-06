@@ -51,12 +51,12 @@ def get_city_name(zipcode):
 	try:
 		city = geocode(zipcode)
 		city = find_between(city, '"', '"') 	# remove json formatting
-		city = city.split(', ')					# separate into parts
+		city = city.split(', ')								# separate into parts
 		city[1] = remove_numbers(city[1])
-		return ', '.join(city).strip()			# return final value
+		return ', '.join(city).strip()				# return final value
 	except:
 		print 'Your city was not found, resorting to default.'
-		return 'Austin, TX, USA'				# show sample on break
+		return 'Austin, TX, USA'							# show sample on break
 
 def get_todays_weather(city):
 	""" Fetches today's weather either from DB cache or API """
@@ -141,34 +141,18 @@ def standardize_description(description):
 
 	d = description.lower()
 	conditions = {
-		'clear': 	['clear', 'sunny'],
-		'clouds': 	['cloudy', 'overcast', 'fog'],
-		'storm': 	['thunder'],
-		'freezing': ['ice', 'sleet', 'freezing rain', 'freezing drizzle'],
-		'snow': 	['snow', 'blizzard'],
-		'wet': 		['rain', 'drizzle', 'mist']
+		   'clear': 	['clear', 'sunny'],
+		  'clouds': 	['cloudy', 'overcast', 'fog'],
+		   'storm': 	['thunder'],
+		'freezing': 	['ice', 'sleet', 'freezing rain', 'freezing drizzle'],
+		    'snow': 	['snow', 'blizzard'],
+		     'wet': 	['rain', 'drizzle', 'mist']
 	}
 
 	for key in conditions.keys():
 		if any_in_string(d, conditions[key]):
 			return key
 	return 'other'
-
-	"""if any_in_string(s, clear_chars):
-		conditions = 'clear'
-	elif any_in_string(s, clouds_chars):
-		conditions = 'clouds'
-	elif any_in_string(s, storm_chars):
-		conditions = 'storm'
-	elif any_in_string(s, freezing_chars):
-		conditions = 'freezing'
-	elif any_in_string(s, snow_chars):
-		conditions = 'snow'
-	elif any_in_string(s, wet_chars):
-		conditions = 'wet'
-	else:
-		conditions = 'other'
-	return conditions"""
 
 def compare(location):
 	yesterday = yesterdays_weather(location)
