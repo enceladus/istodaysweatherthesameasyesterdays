@@ -1,11 +1,14 @@
 from __future__ import with_statement
 from flask import Flask, render_template, request, make_response
-import urllib2, simplejson, sqlite3, keys, sys, json
+import urllib2, simplejson, sqlite3, sys, json
 from urllib import urlencode
 from contextlib import closing
 from datetime import date, timedelta
 from flask.ext.sqlalchemy import SQLAlchemy
+
+from responses import CONDITION_RESPONSES
 from app_utils import *
+import keys
 
 DEBUG = True
 app = Flask(__name__)
@@ -14,7 +17,6 @@ app.config.from_object(__name__)
 # database config
 app.config['SQLALCHEMY_DATABASE_URI'] = keys.DATABASE_URI
 db = SQLAlchemy(app)
-
 
 # The flow of the app:
 # 1. Zipcode request resolves to city name - get_city_name(zipcode)
@@ -141,10 +143,10 @@ class Weather(db.Model):
     return "<Weather {0}>".format(self.city)
 
   def hotter_than(self, other):
-    return (self.avg > other.avg + 4)
+    return (self.high > other.high + 4)
 
   def colder_than(self, other):
-    return (self.avg < other.avg - 4)
+    return (self.high < other.high - 4)
 
   def save(self):
     try:
@@ -197,39 +199,49 @@ def standardize_description(api, description):
   print '... failed to standardize description'
   return False
 
-
-
 def compare(today, yesterday):
+  # primary states temperature comparison
+  primary = "" 
+  # secondary carries weather conditions comparison
+  secondary = ""
 
-  result = ""
+  temperature_the_same = False
 
   if not (today and yesterday):
     print '... cannot compare. Quitting.'
-    return False
+    return "Looks like we can't find your place. Try <a href='http://thefuckingweather.com/'>The Fucking Weather</a> instead."
 
-  if today.hotter_than(yesterday):
-    result = "No, it's hotter"
-  elif today.colder_than(yesterday):
-    result = "No, it's colder"
+  if (today.high > yesterday.high + 2):
+    primary = "It's a bit hotter today"
+  elif (today.high > yesterday.high + 5):
+    primary = "Nope, it's hotter today"
+  elif (today.high > yesterday.high + 8):
+    primary = "Nope, it's quite a bit hotter today"
+  elif (today.high < yesterday.high - 2):
+    if today.high > 60:
+      primary = "It's a bit cooler today"
+    else:
+      primary = "It's a bit colder today"
+  elif (today.high < yesterday.high - 5):
+    if today.high > 60:
+      primary = "Nope, it's cooler today"
+    else:
+      primary = "Nope, it's colder today"
+  elif (today.high < yesterday.high - 8):
+    primary = "It's definitely colder today"
   else:
-    result = "It's about the same"
+    temperature_the_same = True
+    primary = "Yep, pretty much the same"
 
-  if today.conditions != yesterday.conditions:
-    if result[:2] == "No":
-      result += " and "
-    else:
-      result += " but "
+  for weather in CONDITION_RESPONSES:
+    if yesterday.conditions == weather[0] and today.conditions == weather[1]:
+      secondary = weather[2]
+      break
 
-    if today.conditions == 'wet':
-      result += "it's raining (boo)"
-    elif today.conditions == 'clear':
-      result += "it's clear (woo!)"
-    elif today.conditions == 'snow':
-      result += "it's snowing!"
-    else:
-      result += "the sky looks different"
+  if (temperature_the_same and today.conditions == yesterday.conditions):
+    return "%s." % primary
 
-  return result
+  return "%s, %s" % (primary, secondary)
 
 def default_zipcode():
   zipcode = request.cookies.get('zipcode')
@@ -246,7 +258,6 @@ def index(zipcode=None):
   if (zipcode != default_zipcode()):
     new_zipcode = request.args.get('zipcode')
     today, yesterday, weather = get_relative_weather(new_zipcode)
-
     resp = make_response(render_template('index.html', 
       today=today,
       yesterday=yesterday,
