@@ -13,6 +13,7 @@ import keys
 DEBUG = True
 app = Flask(__name__)
 app.config.from_object(__name__)
+app.wsgi_app = WebFactionMiddleware(app.wsgi_app)
 
 # database config
 app.config['SQLALCHEMY_DATABASE_URI'] = keys.DATABASE_URI
